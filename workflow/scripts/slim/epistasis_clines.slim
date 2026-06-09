@@ -1,0 +1,224 @@
+// SLiM v5 simulation: 1D landscape with population size gradient,
+// two unlinked chromosomes, six types of epistasis tracked simultaneously.
+//
+// Command-line parameters (pass with -d KEY=value):
+//   MAX_MIG_RATE   migration rate between adjacent demes; default 0.01
+//   REPLICATE      replicate ID (integer); default 1
+//
+// Migration model:
+//   Nearest-neighbour only: each deme exchanges migrants only with its
+//   immediate left/right neighbour at rate MAX_MIG_RATE.
+//
+// Output:
+//   One TSV file per replicate written to OUT_DIR/
+//   Filename: sim_mig{MAX_MIG_RATE}_rep{REPLICATE}.tsv
+//   First row written at generation 1 (initial state after seeding).
+
+initialize() {
+    // -------------------------------------------------------------------------
+    // Command-line overridable parameters
+    // Pass with e.g.: slim -d MAX_MIG_RATE=0.05 -d REPLICATE=42 -d OUT_DIR='"results"'
+    // -------------------------------------------------------------------------
+    if (!exists("MAX_MIG_RATE")) defineConstant("MAX_MIG_RATE", 0.01);
+    if (!exists("REPLICATE"))    defineConstant("REPLICATE",    1);
+    if (!exists("OUT_FILE"))     defineConstant("OUT_FILE", "./sim_mig" + MAX_MIG_RATE + "_rep" + REPLICATE + ".tsv");
+
+    // -------------------------------------------------------------------------
+    // Fixed parameters
+    // -------------------------------------------------------------------------
+    defineConstant("NUM_POPS",      40);
+    defineConstant("POP_MAX",   10000);
+    defineConstant("POP_MIN",      10);
+    defineConstant("MU",         1e-8);
+    defineConstant("RHO",        1e-9);
+    defineConstant("CHROM_LEN",  10000);
+    defineConstant("GENE_START",  4500);
+    defineConstant("GENE_END",    5500);
+    defineConstant("FOCAL_POS",   5000);
+    defineConstant("T_END",      5000);
+    defineConstant("OUT_FREQ",     50);
+
+    // -------------------------------------------------------------------------
+    // Mutation types
+    // -------------------------------------------------------------------------
+    initializeMutationType("m1", 0.5, "f", 0.0);
+    m1.convertToSubstitution = T;
+
+    initializeMutationType("m2", 1.0, "f", 0.0);   // dominant allele, locus A
+    m2.convertToSubstitution = F;
+
+    initializeMutationType("m3", 1.0, "f", 0.0);   // dominant allele, locus B
+    m3.convertToSubstitution = F;
+
+    // -------------------------------------------------------------------------
+    // Genomic element types
+    // -------------------------------------------------------------------------
+    initializeGenomicElementType("g1", m1, 1.0);
+    initializeGenomicElementType("g2", m1, 1.0);
+
+    // -------------------------------------------------------------------------
+    // Chromosome 1 — locus A
+    // -------------------------------------------------------------------------
+    initializeChromosome(1, CHROM_LEN);
+    initializeGenomicElement(g1, 0,          GENE_START - 1);
+    initializeGenomicElement(g2, GENE_START, GENE_END);
+    initializeGenomicElement(g1, GENE_END+1, CHROM_LEN - 1);
+    initializeMutationRate(MU);
+    initializeRecombinationRate(RHO);
+
+    // -------------------------------------------------------------------------
+    // Chromosome 2 — locus B
+    // -------------------------------------------------------------------------
+    initializeChromosome(2, CHROM_LEN);
+    initializeGenomicElement(g1, 0,          GENE_START - 1);
+    initializeGenomicElement(g2, GENE_START, GENE_END);
+    initializeGenomicElement(g1, GENE_END+1, CHROM_LEN - 1);
+    initializeMutationRate(MU);
+    initializeRecombinationRate(RHO);
+
+}
+
+// =============================================================================
+// OUTPUT FUNCTION — called explicitly from 1 late() and the recurring late()
+// =============================================================================
+function (void) writeOutput(void) {
+    for (pop in sim.subpopulations) {
+        n = pop.individualCount;
+        if (n == 0) next;
+
+        re_purple = 0;  re_red = 0;    re_white  = 0;
+        de_white  = 0;  de_yellow = 0; de_green  = 0;
+        di_0 = 0;       di_1 = 0;
+        dre_1 = 0;      dre_0 = 0;
+        dde_1 = 0;      dde_0 = 0;
+        po_disc = 0;    po_sphere = 0; po_long   = 0;
+        countA = 0;     countB = 0;
+
+        for (ind in pop.individuals) {
+            domA = (sum(ind.haplosomes[0].mutations.mutationType == m2) > 0) |
+                   (sum(ind.haplosomes[1].mutations.mutationType == m2) > 0);
+            domB = (sum(ind.haplosomes[2].mutations.mutationType == m3) > 0) |
+                   (sum(ind.haplosomes[3].mutations.mutationType == m3) > 0);
+
+            // Allele copy counts (0, 1, or 2 per individual)
+            countA = countA +
+                     asInteger(sum(ind.haplosomes[0].mutations.mutationType == m2) > 0) +
+                     asInteger(sum(ind.haplosomes[1].mutations.mutationType == m2) > 0);
+            countB = countB +
+                     asInteger(sum(ind.haplosomes[2].mutations.mutationType == m3) > 0) +
+                     asInteger(sum(ind.haplosomes[3].mutations.mutationType == m3) > 0);
+
+            // 1. Recessive Epistasis (9:3:4)
+            if (domA & domB)        re_purple = re_purple + 1;
+            else if (domA & !domB)  re_red    = re_red    + 1;
+            else                    re_white  = re_white  + 1;
+
+            // 2. Dominant Epistasis (12:3:1)
+            if (domA)               de_white  = de_white  + 1;
+            else if (domB)          de_yellow = de_yellow + 1;
+            else                    de_green  = de_green  + 1;
+
+            // 3. Dominant Inhibitory Epistasis (13:3)
+            if (!domA & domB)       di_1 = di_1 + 1;
+            else                    di_0 = di_0 + 1;
+
+            // 4. Duplicate Recessive Epistasis (9:7)
+            if (domA & domB)        dre_1 = dre_1 + 1;
+            else                    dre_0 = dre_0 + 1;
+
+            // 5. Duplicate Dominant Epistasis (15:1)
+            if (domA | domB)        dde_1 = dde_1 + 1;
+            else                    dde_0 = dde_0 + 1;
+
+            // 6. Polymeric Gene Interaction (9:6:1)
+            if (domA & domB)        po_disc   = po_disc   + 1;
+            else if (domA | domB)   po_sphere = po_sphere + 1;
+            else                    po_long   = po_long   + 1;
+        }
+
+        line = sim.cycle + "\t" + pop.id + "\t" + n + "\t" +
+               MAX_MIG_RATE + "\t" + REPLICATE + "\t" + POP_MAX + "\t" + POP_MIN + "\t" +
+               (countA / (2.0 * n)) + "\t" + (countB / (2.0 * n)) + "\t" +
+               (re_purple / n) + "\t" + (re_red / n)    + "\t" + (re_white / n)  + "\t" +
+               (de_white  / n) + "\t" + (de_yellow / n) + "\t" + (de_green / n)  + "\t" +
+               (di_0 / n)      + "\t" + (di_1 / n)      + "\t" +
+               (dre_1 / n)     + "\t" + (dre_0 / n)     + "\t" +
+               (dde_1 / n)     + "\t" + (dde_0 / n)     + "\t" +
+               (po_disc / n)   + "\t" + (po_sphere / n) + "\t" + (po_long / n);
+
+        writeFile(OUT_FILE, line, append=T);
+    }
+}
+
+// =============================================================================
+// 1  BUILD SUBPOPULATIONS
+// =============================================================================
+1 early() {
+    // Demography must be established in early() so offspring generation in
+    // generation 1 already uses the correct population structure.
+    logMax = log10(POP_MAX);
+    logMin = log10(POP_MIN);
+
+    for (i in 1:NUM_POPS) {
+        frac = (i - 1.0) / (NUM_POPS - 1.0);
+        sz = asInteger(round(10^(logMax - frac * (logMax - logMin))));
+        sim.addSubpop("p" + i, sz);
+    }
+
+    // Nearest-neighbour migration only.
+    // Interior demes have two neighbours so total emigration = 2 * MAX_MIG_RATE;
+    // keep MAX_MIG_RATE <= 0.5.
+    if (MAX_MIG_RATE > 0.0) {
+        for (i in 1:NUM_POPS) {
+            src = sim.subpopulations[sim.subpopulations.id == i];
+            if (i > 1) {
+                left = sim.subpopulations[sim.subpopulations.id == (i - 1)];
+                src.setMigrationRates(left, MAX_MIG_RATE);
+            }
+            if (i < NUM_POPS) {
+                right = sim.subpopulations[sim.subpopulations.id == (i + 1)];
+                src.setMigrationRates(right, MAX_MIG_RATE);
+            }
+        }
+    }
+}
+
+1 late() {
+    // Seed dominant alleles at frequency 0.5 in all populations.
+    // Done in late() so mutations are present in the individuals that will
+    // act as parents from generation 2 onward (avoids the WF early() warning).
+    for (pop in sim.subpopulations) {
+        for (ind in pop.individuals) {
+            ind.haplosomes[0].addNewMutation(m2, 0.0, FOCAL_POS);
+            ind.haplosomes[2].addNewMutation(m3, 0.0, FOCAL_POS);
+        }
+    }
+
+    // Write header then immediately output generation 1 as the baseline
+    header = "generation\tpop_id\tpop_size\tmax_mig_rate\treplicate\tpop_max\tpop_min\t" +
+             "freq_domA\tfreq_domB\t" +
+             "RE_purple\tRE_red\tRE_white\t" +
+             "DE_white\tDE_yellow\tDE_green\t" +
+             "DI_pheno0\tDI_pheno1\t" +
+             "DRE_pheno1\tDRE_pheno0\t" +
+             "DDE_pheno1\tDDE_pheno0\t" +
+             "PO_disc\tPO_sphere\tPO_long";
+    writeFile(OUT_FILE, header, append=F);
+    writeOutput();   // baseline snapshot at generation 1
+}
+
+// =============================================================================
+// 2  PHENOTYPE TRACKING — every OUT_FREQ generations
+// =============================================================================
+late() {
+    if (sim.cycle % OUT_FREQ != 0) return;
+    writeOutput();
+}
+
+// =============================================================================
+// 3  END
+// =============================================================================
+T_END late() {
+    catn("Simulation complete: mig=" + MAX_MIG_RATE + " rep=" + REPLICATE);
+    sim.simulationFinished();
+}

@@ -1,0 +1,49 @@
+import os
+import glob
+import pandas as pd
+from snakemake.utils import min_version
+
+min_version("9.21.0")
+
+# =====================
+# OUTPUTS
+# =====================
+
+SLIM = f"{config["results_prefix"]}/slim"
+LOGS = f"{config["log_prefix"]}"
+
+# ======================
+# PARAMETERS
+# ======================
+
+MIG_RATES = [0, 0.01, 0.05]
+REPLICATES = [i+1 for i in range(1000)]
+
+# ======================
+# Per-replicate SLiM run
+# ======================
+
+rule all:
+    input:
+        expand(f"{SLIM}/mig{{mig}}/sim_mig{{mig}}_rep{{rep}}.tsv", mig=MIG_RATES, rep=REPLICATES)
+
+rule run_slim:
+    output:
+        f"{SLIM}/mig{{mig}}/sim_mig{{mig}}_rep{{rep}}.tsv"
+    params:
+        mig    = lambda w: w.mig,
+        rep    = lambda w: w.rep,
+        out_dir = SLIM
+    log:
+        f"{LOGS}/run_slim/mig{{mig}}/slim_mig{{mig}}_rep{{rep}}.log"
+    conda: "./envs/slim.yaml"
+    shell:
+        """
+        slim \
+            -d MAX_MIG_RATE={params.mig} \
+            -d REPLICATE={params.rep} \
+            -d 'OUT_FILE="{output}"' \
+            ./scripts/slim/epistasis_clines.slim \
+            > {log} 2>&1
+        """
+
