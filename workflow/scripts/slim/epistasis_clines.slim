@@ -86,65 +86,104 @@ function (void) writeOutput(void) {
         n = pop.individualCount;
         if (n == 0) next;
 
-        re_purple = 0;  re_red = 0;    re_white  = 0;
-        de_white  = 0;  de_yellow = 0; de_green  = 0;
-        di_0 = 0;       di_1 = 0;
-        dre_1 = 0;      dre_0 = 0;
-        dde_1 = 0;      dde_0 = 0;
-        po_disc = 0;    po_sphere = 0; po_long   = 0;
+        // Counters, named generically. pheno1 = first class in the conventional
+        // F2 ratio for each interaction type (see comments below).
+        re1 = 0;  re2 = 0;  re3 = 0;    // Recessive epistasis    (9:3:4)
+        de1 = 0;  de2 = 0;  de3 = 0;    // Dominant epistasis     (12:3:1)
+        di1 = 0;  di2 = 0;              // Dominant inhibitory    (13:3)
+        dre1 = 0; dre2 = 0;             // Duplicate recessive    (9:7)
+        dde1 = 0; dde2 = 0;             // Duplicate dominant     (15:1)
+        po1 = 0;  po2 = 0;  po3 = 0;    // Polymeric              (9:6:1)
+
+        // Control A: dihybrid, NO epistasis (9:3:3:1) — four distinct classes.
+        // Same complete-dominance machinery as the six types, but each genotype
+        // class maps to its own phenotype (no inter-locus interaction).
+        ne1 = 0;  ne2 = 0;  ne3 = 0;  ne4 = 0;   // A_B_ : A_bb : aaB_ : aabb
+
+        // Control B: strictly additive dosage (no dominance, no epistasis).
+        // Phenotype value = number of counted alleles across both loci (0..4).
+        // Reported as the frequency of each dosage class. Note: the population
+        // MEAN of this trait is exactly 2*(freq_domA + freq_domB), so it is a
+        // linear function of the allele frequencies already output; the class
+        // distribution below is what carries extra (HWE/LD-departure) info.
+        add0 = 0; add1 = 0; add2 = 0; add3 = 0; add4 = 0;
+
         countA = 0;     countB = 0;
 
         for (ind in pop.individuals) {
-            domA = (sum(ind.haplosomes[0].mutations.mutationType == m2) > 0) |
-                   (sum(ind.haplosomes[1].mutations.mutationType == m2) > 0);
-            domB = (sum(ind.haplosomes[2].mutations.mutationType == m3) > 0) |
-                   (sum(ind.haplosomes[3].mutations.mutationType == m3) > 0);
+            // Per-locus dosage (0, 1, or 2 copies of the counted allele)
+            dosageA = asInteger(sum(ind.haplosomes[0].mutations.mutationType == m2) > 0) +
+                      asInteger(sum(ind.haplosomes[1].mutations.mutationType == m2) > 0);
+            dosageB = asInteger(sum(ind.haplosomes[2].mutations.mutationType == m3) > 0) +
+                      asInteger(sum(ind.haplosomes[3].mutations.mutationType == m3) > 0);
 
-            // Allele copy counts (0, 1, or 2 per individual)
-            countA = countA +
-                     asInteger(sum(ind.haplosomes[0].mutations.mutationType == m2) > 0) +
-                     asInteger(sum(ind.haplosomes[1].mutations.mutationType == m2) > 0);
-            countB = countB +
-                     asInteger(sum(ind.haplosomes[2].mutations.mutationType == m3) > 0) +
-                     asInteger(sum(ind.haplosomes[3].mutations.mutationType == m3) > 0);
+            domA = (dosageA > 0);
+            domB = (dosageB > 0);
+
+            countA = countA + dosageA;
+            countB = countB + dosageB;
 
             // 1. Recessive Epistasis (9:3:4)
-            if (domA & domB)        re_purple = re_purple + 1;
-            else if (domA & !domB)  re_red    = re_red    + 1;
-            else                    re_white  = re_white  + 1;
+            //    pheno1 = A_B_ (9), pheno2 = A_bb (3), pheno3 = aa__ (4)
+            if (domA & domB)        re1 = re1 + 1;
+            else if (domA & !domB)  re2 = re2 + 1;
+            else                    re3 = re3 + 1;
 
             // 2. Dominant Epistasis (12:3:1)
-            if (domA)               de_white  = de_white  + 1;
-            else if (domB)          de_yellow = de_yellow + 1;
-            else                    de_green  = de_green  + 1;
+            //    pheno1 = A___ (12), pheno2 = aaB_ (3), pheno3 = aabb (1)
+            if (domA)               de1 = de1 + 1;
+            else if (domB)          de2 = de2 + 1;
+            else                    de3 = de3 + 1;
 
             // 3. Dominant Inhibitory Epistasis (13:3)
-            if (!domA & domB)       di_1 = di_1 + 1;
-            else                    di_0 = di_0 + 1;
+            //    pheno1 = rest (13), pheno2 = aaB_ (3)
+            if (!domA & domB)       di2 = di2 + 1;
+            else                    di1 = di1 + 1;
 
             // 4. Duplicate Recessive Epistasis (9:7)
-            if (domA & domB)        dre_1 = dre_1 + 1;
-            else                    dre_0 = dre_0 + 1;
+            //    pheno1 = A_B_ (9), pheno2 = rest (7)
+            if (domA & domB)        dre1 = dre1 + 1;
+            else                    dre2 = dre2 + 1;
 
             // 5. Duplicate Dominant Epistasis (15:1)
-            if (domA | domB)        dde_1 = dde_1 + 1;
-            else                    dde_0 = dde_0 + 1;
+            //    pheno1 = any dominant (15), pheno2 = aabb (1)
+            if (domA | domB)        dde1 = dde1 + 1;
+            else                    dde2 = dde2 + 1;
 
             // 6. Polymeric Gene Interaction (9:6:1)
-            if (domA & domB)        po_disc   = po_disc   + 1;
-            else if (domA | domB)   po_sphere = po_sphere + 1;
-            else                    po_long   = po_long   + 1;
+            //    pheno1 = A_B_ (9), pheno2 = one dominant (6), pheno3 = aabb (1)
+            if (domA & domB)        po1 = po1 + 1;
+            else if (domA | domB)   po2 = po2 + 1;
+            else                    po3 = po3 + 1;
+
+            // Control A. No epistasis (9:3:3:1): four distinct classes
+            //    pheno1 = A_B_ (9), pheno2 = A_bb (3), pheno3 = aaB_ (3), pheno4 = aabb (1)
+            if (domA & domB)        ne1 = ne1 + 1;
+            else if (domA & !domB)  ne2 = ne2 + 1;
+            else if (!domA & domB)  ne3 = ne3 + 1;
+            else                    ne4 = ne4 + 1;
+
+            // Control B. Additive dosage (0..4): bin by total counted alleles
+            dos = dosageA + dosageB;
+            if      (dos == 0) add0 = add0 + 1;
+            else if (dos == 1) add1 = add1 + 1;
+            else if (dos == 2) add2 = add2 + 1;
+            else if (dos == 3) add3 = add3 + 1;
+            else               add4 = add4 + 1;
         }
 
         line = sim.cycle + "\t" + pop.id + "\t" + n + "\t" +
                MAX_MIG_RATE + "\t" + REPLICATE + "\t" + POP_MAX + "\t" + POP_MIN + "\t" +
                (countA / (2.0 * n)) + "\t" + (countB / (2.0 * n)) + "\t" +
-               (re_purple / n) + "\t" + (re_red / n)    + "\t" + (re_white / n)  + "\t" +
-               (de_white  / n) + "\t" + (de_yellow / n) + "\t" + (de_green / n)  + "\t" +
-               (di_0 / n)      + "\t" + (di_1 / n)      + "\t" +
-               (dre_1 / n)     + "\t" + (dre_0 / n)     + "\t" +
-               (dde_1 / n)     + "\t" + (dde_0 / n)     + "\t" +
-               (po_disc / n)   + "\t" + (po_sphere / n) + "\t" + (po_long / n);
+               (re1 / n)  + "\t" + (re2 / n)  + "\t" + (re3 / n)  + "\t" +
+               (de1 / n)  + "\t" + (de2 / n)  + "\t" + (de3 / n)  + "\t" +
+               (di1 / n)  + "\t" + (di2 / n)  + "\t" +
+               (dre1 / n) + "\t" + (dre2 / n) + "\t" +
+               (dde1 / n) + "\t" + (dde2 / n) + "\t" +
+               (po1 / n)  + "\t" + (po2 / n)  + "\t" + (po3 / n)  + "\t" +
+               (ne1 / n)  + "\t" + (ne2 / n)  + "\t" + (ne3 / n)  + "\t" + (ne4 / n)  + "\t" +
+               (add0 / n) + "\t" + (add1 / n) + "\t" + (add2 / n) + "\t" +
+               (add3 / n) + "\t" + (add4 / n);
 
         writeFile(OUT_FILE, line, append=T);
     }
@@ -197,12 +236,14 @@ function (void) writeOutput(void) {
     // Write header then immediately output generation 1 as the baseline
     header = "generation\tpop_id\tpop_size\tmax_mig_rate\treplicate\tpop_max\tpop_min\t" +
              "freq_domA\tfreq_domB\t" +
-             "RE_purple\tRE_red\tRE_white\t" +
-             "DE_white\tDE_yellow\tDE_green\t" +
-             "DI_pheno0\tDI_pheno1\t" +
-             "DRE_pheno1\tDRE_pheno0\t" +
-             "DDE_pheno1\tDDE_pheno0\t" +
-             "PO_disc\tPO_sphere\tPO_long";
+             "RE_pheno1\tRE_pheno2\tRE_pheno3\t" +
+             "DE_pheno1\tDE_pheno2\tDE_pheno3\t" +
+             "DI_pheno1\tDI_pheno2\t" +
+             "DRE_pheno1\tDRE_pheno2\t" +
+             "DDE_pheno1\tDDE_pheno2\t" +
+             "PO_pheno1\tPO_pheno2\tPO_pheno3\t" +
+             "NE_pheno1\tNE_pheno2\tNE_pheno3\tNE_pheno4\t" +
+             "ADD_d0\tADD_d1\tADD_d2\tADD_d3\tADD_d4";
     writeFile(OUT_FILE, header, append=F);
     writeOutput();   // baseline snapshot at generation 1
 }
